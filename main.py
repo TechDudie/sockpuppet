@@ -1,6 +1,5 @@
 import argparse
 import requests
-import speedtest
 import time
 
 LIST_PROXIFLY = "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/countries/{}/data.json"
@@ -20,6 +19,27 @@ try:
 except:
     log("Failed to load API key from .env file", level="WARN")
 
+SPEEDTEST_DOWNLOAD = "https://raw.githubusercontent.com/TechDudie/sockscraper/refs/heads/main/download_{}"
+
+def speedtest(proxy_ip, proxy_port, size=0):
+    proxies = {
+        "http": f"socks5h://{proxy_ip}:{proxy_port}",
+        "https": f"socks5h://{proxy_ip}:{proxy_port}",
+        "socks5": f"socks5h://{proxy_ip}:{proxy_port}"
+    }
+
+    try:
+        start_time = time.time()
+        response = requests.get(SPEEDTEST_DOWNLOAD.format(size), proxies=proxies, timeout=3, stream=True)
+        response.raise_for_status()
+        total_size = 0
+        for chunk in response.iter_content(chunk_size=1024): total_size += len(chunk)
+        elapsed_time = time.time() - start_time
+        download_speed = total_size / elapsed_time / 1024 / 1024
+        return download_speed
+    except Exception as e:
+        return 0
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="quick lil piece of s*** to scrape some socks5 proxies")
     parser.add_argument(
@@ -28,17 +48,18 @@ if __name__ == "__main__":
         help="Country code",
         default="US"
     )
-    parser.add_argument(
-        "-p", "--protocol",
-        type=str,
-        choices=["http", "socks4", "socks5"],
-        help="Proxy protocol",
-        default="socks5"
-    )
+    # parser.add_argument(
+    #     "-p", "--protocol",
+    #     type=str,
+    #     choices=["http", "socks4", "socks5"],
+    #     help="Proxy protocol",
+    #     default="socks5"
+    # )
     args = parser.parse_args()
 
     country_code = args.country_code
-    protocol = args.protocol
+    # protocol = args.protocol
+    protocol = "socks5"
 
     try:
         proxifly_response = requests.get(LIST_PROXIFLY.format(country_code))
@@ -56,13 +77,25 @@ if __name__ == "__main__":
     proxies = list(set(filtered_fresh + filtered_proxifly))
     print(proxies)
 
+    # for i in proxies:
+    #     ip = i[0]
+    #     port = i[1]
+    #     try:
+    #         response = requests.get(API_GEOLOCATION.format(ip), timeout=5)
+    #         response.raise_for_status()
+    #         data = response.json()
+    #         print(data)
+    #     except:
+    #         log(f"Failed to fetch geolocation for {ip}", level="WARN")
+    
+    speeds = []
     for i in proxies:
         ip = i[0]
         port = i[1]
-        try:
-            response = requests.get(API_GEOLOCATION.format(ip), timeout=5)
-            response.raise_for_status()
-            data = response.json()
-            print(data)
-        except:
-            log(f"Failed to fetch geolocation for {ip}", level="WARN")
+        speed = speedtest(ip, port)
+        if speed > 0: speeds.append((f"{ip}:{port}", speed))
+    
+    proxies = sorted(speeds, key=lambda x: x[1], reverse=True)
+    
+    for proxy in proxies:
+        log(f"Proxy {proxy[0]} - Speed: {proxy[1]:.2f}MB/s")
