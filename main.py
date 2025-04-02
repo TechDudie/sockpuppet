@@ -21,7 +21,7 @@ start_time = time.time()
 def log(message: str, level="INFO"):
     elapsed_time = time.time() - start_time
     formatted_time = f"{int(elapsed_time // 3600):02}:{int((elapsed_time % 3600) // 60):02}:{int(elapsed_time % 60):02}.{int((elapsed_time % 1) * 1000):03}"
-    print(f"[Sockscraper] [{formatted_time}] [{level}] {message}")
+    print(f"[sockscraper] [{formatted_time}] [{level}] {message}")
 
 try:
     with open(".env") as f:
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     country_code = "US"
     protocol = "socks5"
 
-    log(f"Sockscraper {_VERSION} initalized")
+    log(f"Ssckscraper {_VERSION} initalized")
     log("Fetching proxy data")
 
     try:
@@ -118,6 +118,7 @@ if __name__ == "__main__":
         log(f"Benchmarking {len(proxies)} proxy servers")
     else:
         log("No proxies found", level="ERROR")
+        exit()
     
     global i, j, delta, speeds
     speeds = []
@@ -125,13 +126,15 @@ if __name__ == "__main__":
     skibidi = True
     filtered_proxies = []
     results = []
+    test_count = 1
     while skibidi:
         i = 0
         j = 0
         delta = 1 / len(proxies)
+        log(f"Starting test #{test_count}, 4MB download size, {0.1 * t}s timeout at {SPEEDTEST_DOWNLOAD.format(0)}")
 
         pool = multiprocessing.Pool(multiprocessing.cpu_count())
-        for server in proxies: pool.apply_async(speedtest, args=(server, 0.10 * t), callback=speedtest_callback)
+        for server in proxies: pool.apply_async(speedtest, args=(server, 0.1 * t), callback=speedtest_callback)
         pool.close()
         pool.join()
         print()
@@ -149,9 +152,10 @@ if __name__ == "__main__":
             skibidi = False
         else:
             t += 1
+            test_count += 1
             log(f"No proxies responded, raising timeout to {0.1 * t} seconds", "WARN")
 
-    log(f"Found {len(results)} possible servers: {results}")
+    log(f"Discovered {len(results)} possible servers: {results}")
     
     speeds = []
     for i in results[:8]:
