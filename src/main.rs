@@ -1,7 +1,7 @@
 use regex::Regex;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
-use tokio::io::{copy, AsyncReadExt};
+use tokio::io::{copy, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use warp::Filter;
 
@@ -57,6 +57,75 @@ async fn run_api(state: ProxyState) {
     warp::serve(set_target).run(([127, 0, 0, 1], 7070)).await;
 }
 
+async fn handle_proxy(client_stream: &mut TcpStream) -> std::io::Result<TcpStream> {
+    let mut buf = [0u8; 1024];
+
+    // Read client's greeting
+    client_stream.read(&mut buf).await?;
+    if buf[0] != 0x05 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Not SOCKS5"));
+    }
+
+    // Send authentication method (0x05 = SOCKS5, 0x00 = No authentication)
+    client_stream.write_all(&[0x05, 0x00]).await?;
+
+    // Read client request
+    client_stream.read(&mut buf).await?;
+    if buf[1] != 0x01 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Only TCP connect supported"));
+    }
+
+    // Parse target address
+    let addr = match buf[3] {
+        0x01 => {
+            // IPv4
+            let ip = format!("{}.{}.{}.{}", buf[4], buf[5], buf[6], buf[7]);
+            let port = u16::from_be_bytes([buf[8], buf[9]]);
+            format!("{}:{}", ip, port)
+        }
+        0x03 => {
+            // Domain name
+            let len = buf[4] as usize;
+            let domain = String::from_utf8_lossy(&buf[5..5 + len]).to_string();
+            let port = u16::from_be_bytes([buf[5 + len], buf[6 + len]]);
+            format!("{}:{}", domain, port)
+        }
+        _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid address type")),
+    };
+
+    // Connect to the requested address
+    let server_stream = TcpStream::connect(&addr).await?;
+
+    // Send success response
+    let response = [0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]; // Success with 0.0.0.0:0
+    client_stream.write_all(&response).await?;
+
+    Ok(server_stream)
+}
+
+async fn handle_connection(client_stream: &mut TcpStream, state: ProxyState) -> std::io::Result<()> {
+    let mut buf = [0u8; 1024];
+    client_stream.read(&mut buf).await?;
+
+    let target_addr = {
+        let addr = state.target_addr.lock().unwrap();
+        addr.clone()
+    };
+
+    let mut server_stream = handle_proxy(client_stream).await?;
+    log(&format!("Redirecting to: {}", target_addr), "INFO");
+
+    let (mut client_read, mut client_write) = client_stream.split();
+    let (mut server_read, mut server_write) = server_stream.split();
+
+    tokio::try_join!(
+        copy(&mut client_read, &mut server_write),
+        copy(&mut server_read, &mut client_write)
+    )?;
+
+    return Ok(())
+}
+
 async fn run_proxy(state: ProxyState) -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6969").await?;
     log("SOCKS5 Proxy running on 127.0.0.1:6969", "INFO");
@@ -71,29 +140,6 @@ async fn run_proxy(state: ProxyState) -> std::io::Result<()> {
             }
         });
     }
-}
-
-async fn handle_connection(client_stream: &mut TcpStream, state: ProxyState) -> std::io::Result<()> {
-    let mut buf = [0u8; 1024];
-    client_stream.read(&mut buf).await?;
-
-    let target_addr = {
-        let addr = state.target_addr.lock().unwrap();
-        addr.clone()
-    };
-
-    let mut server_stream = TcpStream::connect(&target_addr).await?;
-    log(&format!("Redirecting to: {}", target_addr), "INFO");
-
-    let (mut client_read, mut client_write) = client_stream.split();
-    let (mut server_read, mut server_write) = server_stream.split();
-
-    tokio::try_join!(
-        copy(&mut client_read, &mut server_write),
-        copy(&mut server_read, &mut client_write)
-    )?;
-
-    return Ok(())
 }
 
 #[tokio::main]
