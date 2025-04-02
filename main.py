@@ -23,12 +23,12 @@ def log(message: str, level="INFO"):
     formatted_time = f"{int(elapsed_time // 3600):02}:{int((elapsed_time % 3600) // 60):02}:{int(elapsed_time % 60):02}.{int((elapsed_time % 1) * 1000):03}"
     print(f"[sockscraper] [{formatted_time}] [{level}] {message}")
 
-try:
-    with open(".env") as f:
-        API_GEOLOCATION_KEY = dict(line.strip().split("=", 1) for line in f.read().split("\n") if line.strip() and "=" in line)["API_GEOLOCATION"]
-        API_GEOLOCATION = "https://api.ipgeolocation.io/ipgeo?apiKey={}&ip={}".format(API_GEOLOCATION_KEY, "{}")
-except:
-    log("Failed to load API key from .env file", level="WARN")
+# try:
+#     with open(".env") as f:
+#         API_GEOLOCATION_KEY = dict(line.strip().split("=", 1) for line in f.read().split("\n") if line.strip() and "=" in line)["API_GEOLOCATION"]
+#         API_GEOLOCATION = "https://api.ipgeolocation.io/ipgeo?apiKey={}&ip={}".format(API_GEOLOCATION_KEY, "{}")
+# except:
+#     log("Failed to load API key from .env file", level="WARN")
 
 SPEEDTEST_DOWNLOAD = "https://raw.githubusercontent.com/TechDudie/sockscraper/refs/heads/main/static/download_{}{}".format("{}", random.randint(0, 9))
 
