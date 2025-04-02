@@ -1,0 +1,25 @@
+name: build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: "macos-latest"
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --verbose
+    - name: Package
+      run: mv target/debug/sockpuppet target/debug/sockpuppet-server
+    - uses: actions/upload-artifact@v4
+      with:
+        name: sockpuppet-server-${{ runner.os }}-${{ runner.arch }}
+        path: target/debug/sockpuppet-server
