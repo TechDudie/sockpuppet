@@ -26,7 +26,8 @@ async fn handle_proxy(client_stream: &mut TcpStream, state: ProxyState) -> std::
     if buf[0] != 0x05 {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Not SOCKS5"));
     }
-    
+    let num_methods = buf[1] as usize;
+    client_stream.read_exact(&mut buf[..num_methods]).await?;
     client_stream.write_all(&[0x05, 0x00]).await?;
     
     client_stream.read_exact(&mut buf[..4]).await?;
@@ -54,7 +55,13 @@ async fn handle_proxy(client_stream: &mut TcpStream, state: ProxyState) -> std::
     
     let target_addr = state.target_addr.lock().unwrap().clone();
     let mut proxy_stream = TcpStream::connect(target_addr).await?;
-    client_stream.write_all(&[0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0]).await?;
+    
+    let response = [
+        0x05, 0x00, 0x00, 0x01,
+        127, 0, 0, 1,
+        0x1B, 0x39
+    ];
+    client_stream.write_all(&response).await?;
     
     Ok(proxy_stream)
 }
