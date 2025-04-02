@@ -24,7 +24,7 @@ fn is_valid_target(target: &str) -> bool {
     return re.is_match(target)
 }
 
-async fn handle_proxy(client_stream: &mut TcpStream) -> std::io::Result<TcpStream> {
+async fn handle_proxy(client_stream: &mut TcpStream, state: ProxyState) -> std::io::Result<TcpStream> {
     let mut buf = [0u8; 1024];
 
     // Read client's greeting
@@ -45,13 +45,11 @@ async fn handle_proxy(client_stream: &mut TcpStream) -> std::io::Result<TcpStrea
     // Parse target address
     let addr = match buf[3] {
         0x01 => {
-            // IPv4
             let ip = format!("{}.{}.{}.{}", buf[4], buf[5], buf[6], buf[7]);
             let port = u16::from_be_bytes([buf[8], buf[9]]);
             format!("{}:{}", ip, port)
         }
         0x03 => {
-            // Domain name
             let len = buf[4] as usize;
             let domain = String::from_utf8_lossy(&buf[5..5 + len]).to_string();
             let port = u16::from_be_bytes([buf[5 + len], buf[6 + len]]);
@@ -60,32 +58,45 @@ async fn handle_proxy(client_stream: &mut TcpStream) -> std::io::Result<TcpStrea
         _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid address type")),
     };
 
-    // Connect to the requested address
-    let server_stream = TcpStream::connect(&addr).await?;
+    // Instead of connecting directly, forward through another proxy (localhost:31337)
+    let target_addr = state.target_addr.lock().unwrap().clone();
+    let mut proxy_stream = TcpStream::connect(target_addr).await?;
 
-    // Send success response
-    let response = [0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]; // Success with 0.0.0.0:0
-    client_stream.write_all(&response).await?;
+    // Relay the original SOCKS5 request to the upstream proxy
+    proxy_stream.write_all(&buf[..]).await?;
+    
+    // Read response from upstream proxy
+    proxy_stream.read(&mut buf).await?;
 
-    Ok(server_stream)
+    // Forward the response back to the client
+    client_stream.write_all(&buf[..]).await?;
+
+    Ok(proxy_stream)
 }
 
-async fn handle_connection(mut client_stream: TcpStream, _state: ProxyState) -> std::io::Result<()> {
-    // Perform SOCKS5 handshake and obtain the destination server stream
-    let mut server_stream = handle_proxy(&mut client_stream).await?;
+async fn handle_connection(mut client_stream: TcpStream, state: ProxyState) -> std::io::Result<()> {
+    match handle_proxy(&mut client_stream, state).await {
+        Ok(mut server_stream) => {
+            let (mut client_read, mut client_write) = client_stream.split();
+            let (mut server_read, mut server_write) = server_stream.split();
 
-    log("SOCKS5 connection established", "INFO");
+            let transfer = tokio::try_join!(
+                copy(&mut client_read, &mut server_write),
+                copy(&mut server_read, &mut client_write)
+            );
 
-    let (mut client_read, mut client_write) = client_stream.split();
-    let (mut server_read, mut server_write) = server_stream.split();
-
-    tokio::try_join!(
-        copy(&mut client_read, &mut server_write),
-        copy(&mut server_read, &mut client_write)
-    )?;
+            if let Err(e) = transfer {
+                log(&format!("Error during data transfer: {}", e), "ERROR");
+            }
+        }
+        Err(e) => {
+            log(&format!("SOCKS5 handshake failed: {}", e), "ERROR");
+        }
+    }
 
     Ok(())
 }
+
 
 async fn run_proxy(state: ProxyState) -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6969").await?;
