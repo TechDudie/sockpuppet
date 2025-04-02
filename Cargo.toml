@@ -1,0 +1,10 @@
+[package]
+name = "sockpuppet"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+warp = "0.3"
+regex = "1"
+chrono = "0.4"
