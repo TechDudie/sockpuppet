@@ -54,7 +54,14 @@ async fn handle_proxy(client_stream: &mut TcpStream, state: ProxyState) -> std::
     };
     
     let target_addr = state.target_addr.lock().unwrap().clone();
-    let mut proxy_stream = TcpStream::connect(target_addr).await?;
+    log(&format!("Forwarding request to: {}", target_addr), "INFO");
+    let proxy_stream = match TcpStream::connect(&target_addr).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            log(&format!("Failed to connect to upstream proxy {}: {}", target_addr, e), "ERROR");
+            return Err(e);
+        }
+    };
     
     let response = [
         0x05, 0x00, 0x00, 0x01,
