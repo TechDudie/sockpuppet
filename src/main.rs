@@ -1,10 +1,9 @@
-use chrono::Local;
 use regex::Regex;
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use tokio::io::{copy, AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use warp::Filter;
-use warp::reply::WithStatus;
 
 #[derive(Clone)]
 struct ProxyState {
@@ -32,18 +31,26 @@ async fn run_api(state: ProxyState) {
         .and(state_filter)
         .and_then(|new_target: String, state: ProxyState| async move {
             if !is_valid_target(&new_target) {
-                log(&format!("Received command to switch to invalid server address: {}", new_target), "WARN");
-                return Ok::<WithStatus<String>, warp::http::StatusCode>(warp::reply::with_status(
-                    new_target,
-                    warp::http::StatusCode::BAD_REQUEST
+                log(
+                    &format!(
+                        "Received command to switch to invalid server address: {}",
+                        new_target
+                    ),
+                    "WARN",
+                );
+                return Ok::<_, Infallible>(warp::reply::with_status(
+                    "Invalid address".to_string(),
+                    warp::http::StatusCode::BAD_REQUEST,
                 ));
             }
+
             let mut addr = state.target_addr.lock().unwrap();
             *addr = new_target.clone();
             log(&format!("Proxy server set to: {}", new_target), "INFO");
-            return Ok::<WithStatus<String>, warp::http::StatusCode>(warp::reply::with_status(
-                new_target,
-                warp::http::StatusCode::OK
+
+            Ok::<_, Infallible>(warp::reply::with_status(
+                "Proxy updated".to_string(),
+                warp::http::StatusCode::OK,
             ))
         });
 
